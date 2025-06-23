@@ -35,6 +35,8 @@ jobs:
       pages: write
       id-token: write
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
 
     steps:
       - name: Deploy artifact
