@@ -66,23 +66,26 @@ if [[ $REPO == "Deathdadev/torchsparse" ]]; then
     sudo apt-get update
     sudo apt-get install -y libsparsehash-dev
   elif [[ $OS == "Windows" ]]; then
-    # 1. Clone the vcpkg repository. Using --depth 1 makes the clone much faster.
+    VCPKG_ROOT="$PWD/vcpkg"
+    
+    # 1. Clone and bootstrap vcpkg
     echo "Cloning vcpkg..."
-    git clone --depth 1 https://github.com/Microsoft/vcpkg.git
+    git clone --depth 1 https://github.com/Microsoft/vcpkg.git "$VCPKG_ROOT"
+    "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
     
-    # 2. Bootstrap vcpkg. This builds the vcpkg executable.
-    # The .sh script works correctly in the Git Bash shell provided by GitHub Actions.
-    echo "Bootstrapping vcpkg..."
-    ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
-    
-    # 3. Integrate vcpkg with the build environment.
-    # This is a crucial step. It tells MSBuild/MSVC how to automatically find
-    # libraries installed by vcpkg, so you don't have to manually set INCLUDE/LIB paths.
-    echo "Integrating vcpkg..."
-    ./vcpkg/vcpkg integrate install
-    
-    # 4. Install the required library.
+    # 2. Install the library
     echo "Installing sparsehash..."
-    ./vcpkg/vcpkg install sparsehash:x64-windows
+    "$VCPKG_ROOT/vcpkg" install sparsehash:x64-windows
+    
+    # 3. Explicitly set environment variables for the compiler
+    # This is the key change to fix the "file not found" error.
+    # We prepend the vcpkg paths to the INCLUDE and LIB variables.
+    VCPKG_INSTALLED_DIR="$VCPKG_ROOT/installed/x64-windows"
+    
+    echo "Updating environment variables for MSVC..."
+    echo "INCLUDE=$VCPKG_INSTALLED_DIR/include;${INCLUDE:-}" >> "$GITHUB_ENV"
+    echo "LIB=$VCPKG_INSTALLED_DIR/lib;${LIB:-}" >> "$GITHUB_ENV"
+    
+    echo "Successfully set up sparsehash for Windows."
   fi
 fi
