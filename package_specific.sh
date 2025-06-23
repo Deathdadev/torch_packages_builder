@@ -60,3 +60,29 @@ if [[ $REPO == "NVlabs/tiny-cuda-nn" ]]; then
   echo "LIBRARY_PATH=/usr/local/cuda/lib64/stubs" >> "$GITHUB_ENV"
   echo "TCNN_CUDA_ARCHITECTURES=${TORCH_CUDA_ARCH_LIST}" | sed "s/\(\.\|\+PTX\)//g" >> "$GITHUB_ENV"
 fi
+
+if [[ $REPO == "Deathdadev/torchsparse" ]]; then
+  if [[ $OS == "Linux" ]]; then
+    sudo apt-get update
+    sudo apt-get install -y libsparsehash-dev
+  elif [[ $OS == "Windows" ]]; then
+    # 1. Clone the vcpkg repository. Using --depth 1 makes the clone much faster.
+    echo "Cloning vcpkg..."
+    git clone --depth 1 https://github.com/Microsoft/vcpkg.git
+    
+    # 2. Bootstrap vcpkg. This builds the vcpkg executable.
+    # The .sh script works correctly in the Git Bash shell provided by GitHub Actions.
+    echo "Bootstrapping vcpkg..."
+    ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+    
+    # 3. Integrate vcpkg with the build environment.
+    # This is a crucial step. It tells MSBuild/MSVC how to automatically find
+    # libraries installed by vcpkg, so you don't have to manually set INCLUDE/LIB paths.
+    echo "Integrating vcpkg..."
+    ./vcpkg/vcpkg integrate install
+    
+    # 4. Install the required library.
+    echo "Installing sparsehash..."
+    ./vcpkg/vcpkg install sparsehash:x64-windows
+  fi
+fi
