@@ -1,4 +1,4 @@
-name: Build Wheels
+name: Build Torchsparse Wheels
 
 on:
   workflow_dispatch:
@@ -196,19 +196,26 @@ jobs:
           CUDA_VERSION: ${{ matrix.compute-platform }}
         run: bash _builder/package_specific.sh
         shell: bash
-
-      - name: Install sparsehash for torchsparse on Linux
+        
+      # --- START: NEW STEPS ---
+      - name: Install dependencies and patch for torchsparse (Linux)
         if: runner.os == 'Linux' && inputs.repo == 'Deathdadev/torchsparse'
         run: |
           sudo apt-get update
           sudo apt-get install -y libsparsehash-dev
-
-      - name: Install sparsehash for torchsparse on Windows
+          sed -i 's/data_ptr<long long>/data_ptr<int64_t>/g' torchsparse/backend/others/downsample_cuda.cu
+          
+      - name: Install vcpkg for torchsparse (Windows)
         if: runner.os == 'Windows' && inputs.repo == 'Deathdadev/torchsparse'
         uses: lukka/run-vcpkg@v11
         with:
-          runInstall: |
-            vcpkg install sparsehash:x64-windows
+          # Pin vcpkg commit to a known-good version for reproducibility.
+          vcpkgGitCommitId: e31988e3483f063c6d2c6734e97e2837d2c186c7
+
+      - name: Install sparsehash for torchsparse (Windows)
+        if: runner.os == 'Windows' && inputs.repo == 'Deathdadev/torchsparse'
+        run: vcpkg install sparsehash:x64-windows
+      # --- END: NEW STEPS ---
 
       - name: Build wheel
         env:
