@@ -61,31 +61,31 @@ if [[ $REPO == "NVlabs/tiny-cuda-nn" ]]; then
   echo "TCNN_CUDA_ARCHITECTURES=${TORCH_CUDA_ARCH_LIST}" | sed "s/\(\.\|\+PTX\)//g" >> "$GITHUB_ENV"
 fi
 
-if [[ $REPO == "Deathdadev/torchsparse" ]]; then
-  if [[ $OS == "Linux" ]]; then
-    sudo apt-get update
-    sudo apt-get install -y libsparsehash-dev
-  elif [[ $OS == "Windows" ]]; then
-    VCPKG_ROOT="$PWD/vcpkg"
+# if [[ $REPO == "Deathdadev/torchsparse" ]]; then
+#   if [[ $OS == "Linux" ]]; then
+#     sudo apt-get update
+#     sudo apt-get install -y libsparsehash-dev
+#   elif [[ $OS == "Windows" ]]; then
+#     VCPKG_ROOT="$PWD/vcpkg"
     
-    # 1. Clone and bootstrap vcpkg
-    echo "Cloning vcpkg..."
-    git clone --depth 1 https://github.com/Microsoft/vcpkg.git "$VCPKG_ROOT"
-    "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+#     # 1. Clone and bootstrap vcpkg
+#     echo "Cloning vcpkg..."
+#     git clone --depth 1 https://github.com/Microsoft/vcpkg.git "$VCPKG_ROOT"
+#     "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
     
-    # 2. Install the library
-    echo "Installing sparsehash..."
-    "$VCPKG_ROOT/vcpkg" install sparsehash:x64-windows
+#     # 2. Install the library
+#     echo "Installing sparsehash..."
+#     "$VCPKG_ROOT/vcpkg" install sparsehash:x64-windows
     
-    # 3. Explicitly set environment variables for the compiler
-    # This is the key change to fix the "file not found" error.
-    # We prepend the vcpkg paths to the INCLUDE and LIB variables.
-    VCPKG_INSTALLED_DIR="$VCPKG_ROOT/installed/x64-windows"
+#     # 3. Explicitly set environment variables for the compiler
+#     # This is the key change to fix the "file not found" error.
+#     # We prepend the vcpkg paths to the INCLUDE and LIB variables.
+#     VCPKG_INSTALLED_DIR="$VCPKG_ROOT/installed/x64-windows"
     
-    echo "Updating environment variables for MSVC..."
-    echo "INCLUDE=$VCPKG_INSTALLED_DIR/include;${INCLUDE:-}" >> "$GITHUB_ENV"
-    echo "LIB=$VCPKG_INSTALLED_DIR/lib;${LIB:-}" >> "$GITHUB_ENV"
+#     echo "Updating environment variables for MSVC..."
+#     echo "INCLUDE=$VCPKG_INSTALLED_DIR/include;${INCLUDE:-}" >> "$GITHUB_ENV"
+#     echo "LIB=$VCPKG_INSTALLED_DIR/lib;${LIB:-}" >> "$GITHUB_ENV"
     
-    echo "Successfully set up sparsehash for Windows."
-  fi
-fi
+#     echo "Successfully set up sparsehash for Windows."
+#   fi
+# fi
