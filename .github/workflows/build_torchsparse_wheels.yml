@@ -1,0 +1,315 @@
+name: Build Wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "Repository name with owner, as in actions/checkout"
+        required: true
+        type: string
+      repo-tag:
+        description: "Repository tag, as in actions/checkout"
+        type: string
+      repo-subdir:
+        description: "Relative path to package dir (or empty if root)"
+        type: string
+      torch-version:
+        description: "Torch versions, separated with a comma"
+        required: true
+        type: string
+      limit-python:
+        description: "Python versions, separated with a comma"
+        type: string
+      limit-compute-platform:
+        description: "PyTorch compute platforms, separated with a comma"
+        type: string
+      include-hash:
+        description: "Include commit hash in version"
+        type: boolean
+        default: false
+      linux-wheels:
+        description: "Build Linux wheels"
+        type: boolean
+        default: true
+      windows-wheels:
+        description: "Build Windows wheels"
+        type: boolean
+        default: true
+      macos-wheels:
+        description: "Build MacOS wheels"
+        type: boolean
+        default: true
+
+jobs:
+  get-jobs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Checkout package repository
+        uses: actions/checkout@v4
+
+      - name: Set job matrix
+        id: job-matrix
+        env:
+          TORCH_VERSION: ${{ inputs.torch-version }}
+          LIMIT_PYTHON: ${{ inputs.limit-python }}
+          LIMIT_COMPUTE_PLATFORM: ${{ inputs.limit-compute-platform }}
+          LINUX_WHEELS: ${{ inputs.linux-wheels }}
+          WINDOWS_WHEELS: ${{ inputs.windows-wheels }}
+          MACOS_WHEELS: ${{ inputs.macos-wheels }}
+        run: |
+          set -eu
+          echo "matrix=$(python get_jobs.py)" >> $GITHUB_OUTPUT
+
+    outputs:
+      matrix: ${{ steps.job-matrix.outputs.matrix }}
+
+  build-wheels:
+    needs: get-jobs
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.get-jobs.outputs.matrix) }}
+
+    steps:
+      - name: Free up space
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/hostedtoolcache/PyPy
+          sudo rm -rf /opt/hostedtoolcache/go
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/lib/heroku
+          sudo rm -rf /usr/local/share/chromium
+
+          sudo apt purge -y \
+            firefox \
+            google-chrome-stable \
+            microsoft-edge-stable
+          sudo apt-get clean
+
+          echo "Disk space after cleanup:"
+          df -h
+
+      - name: Checkout package repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.repo-tag }}
+          submodules: true
+
+      - name: Set version suffix in setup.py
+        run: |
+          set -eu
+
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            brew install gnu-sed
+            PATH="/opt/homebrew/opt/gnu-sed/libexec/gnubin:/usr/local/opt/gnu-sed/libexec/gnubin:$PATH"
+          fi
+
+          HASH=""
+          if [[ "${{ inputs.include-hash }}" == "true" ]]; then
+            HASH=$(git rev-parse --short HEAD)
+          fi
+
+          SETUP_PY_DIR="."
+          if [[ -n "${{ inputs.repo-subdir }}" ]]; then
+            SETUP_PY_DIR="${{ inputs.repo-subdir }}"
+          fi
+
+          VERSION_SUFFIX=+${HASH}pt${{ matrix.torch-version }}${{ matrix.compute-platform }}
+          sed -i "s/\(\(    \|\t\)version=\)\(.*\)\(\,$\)/\1\3 + \"$VERSION_SUFFIX\"\4/w /tmp/changes.txt" $SETUP_PY_DIR/setup.py
+          if [ ! -s "/tmp/changes.txt" ]; then
+            sed -i "s/\(\(    \|\t\)name=.*\,$\)/\1\n    version=\"0.0.1\" + \"$VERSION_SUFFIX\",/w /tmp/changes.txt" $SETUP_PY_DIR/setup.py
+          fi
+          if [ ! -s "/tmp/changes.txt" ]; then
+            exit 1
+          fi
+        shell: bash
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: _builder
+
+      - name: Install CUDA
+        if: ${{ matrix.compute-platform != 'cpu' }}
+        env:
+          CUDA_VERSION: ${{ matrix.compute-platform }}
+        run: |
+          source _builder/.github/workflows/cuda/${{ runner.os }}_install.sh
+        shell: bash
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install PyTorch ${{ matrix.torch-version }}+${{ matrix.compute-platform }}
+        run: |
+          versionlte() {
+            [ "$1" = "`echo -e "$1\n$2" | sort -V | head -n1`" ]
+          }
+          versionlt() {
+            [ "$1" = "$2" ] && return 1 || versionlte $1 $2
+          }
+
+          SETUPTOOLS_VERSION_LIMIT="<75.9"
+          if versionlt ${{ matrix.torch-version }} "2.2.0" ; then
+            SETUPTOOLS_VERSION_LIMIT="<70"
+          fi
+          NUMPY_VERSION_LIMIT=""
+          if versionlt ${{ matrix.torch-version }} "2.4.0" ; then
+            NUMPY_VERSION_LIMIT="<2"
+          fi
+
+          pip install --upgrade \
+            wheel \
+            setuptools$SETUPTOOLS_VERSION_LIMIT \
+            build \
+            --extra-index-url https://download.pytorch.org/whl/${{ matrix.compute-platform }} \
+            torch==${{ matrix.torch-version }} \
+            ninja \
+            numpy$NUMPY_VERSION_LIMIT
+        shell: bash
+
+      - name: Apply package specific steps
+        env:
+          OS: ${{ runner.os }}
+          REPO: ${{ inputs.repo }}
+          TORCH_VERSION: ${{ matrix.torch-version }}
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          COMPUTE_PLATFORM: ${{ matrix.compute-platform }}
+          CUDA_VERSION: ${{ matrix.compute-platform }}
+        run: bash _builder/package_specific.sh
+        shell: bash
+
+      - name: Install sparsehash for torchsparse on Linux
+        if: runner.os == 'Linux' && inputs.repo == 'Deathdadev/torchsparse'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsparsehash-dev
+
+      - name: Install sparsehash for torchsparse on Windows
+        if: runner.os == 'Windows' && inputs.repo == 'Deathdadev/torchsparse'
+        uses: lukka/run-vcpkg@v11
+        with:
+          runInstall: |
+            vcpkg install sparsehash:x64-windows
+
+      - name: Build wheel
+        env:
+          OS: ${{ runner.os }}
+          CUDA_VERSION: ${{ matrix.compute-platform }}
+        run: |
+          if [[ "${{ matrix.compute-platform }}" != "cpu" ]]; then
+            source _builder/.github/workflows/cuda/${{ runner.os }}_env.sh
+          fi
+          source _builder/.github/workflows/env.sh
+
+          SETUP_PY_DIR="."
+          if [[ -n "${{ inputs.repo-subdir }}" ]]; then
+            SETUP_PY_DIR="${{ inputs.repo-subdir }}"
+          fi
+
+          python -m build --wheel --no-isolation --outdir dist $SETUP_PY_DIR
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        name: Upload wheels as artifacts
+        with:
+          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}-pt${{ matrix.torch-version }}-${{ matrix.compute-platform }}
+          path: dist/*.whl
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+
+  create-release:
+    needs: build-wheels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    if: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Free up space
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/hostedtoolcache/PyPy
+          sudo rm -rf /opt/hostedtoolcache/go
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/lib/heroku
+          sudo rm -rf /usr/local/share/chromium
+
+          sudo apt purge -y \
+            firefox \
+            google-chrome-stable \
+            microsoft-edge-stable
+          sudo apt-get clean
+
+          echo "Disk space after cleanup:"
+          df -h
+
+      - name: Get wheels from artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          merge-multiple: true
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "*.whl"
+
+      - name: Get release name
+        id: data
+        run: |
+          set -eu
+
+          wheels=(*.whl)
+          wheel=${wheels[0]}
+          release_name=${wheel%%+*}
+
+          if [[ "${{ inputs.include-hash }}" == "true" ]]; then
+            after_plus=${wheel##*+}
+            hash=${after_plus:0:7}
+            release_name="${release_name}+${hash}"
+          fi
+
+          echo "release_name=${release_name}" >> $GITHUB_OUTPUT
+
+      - uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.data.outputs.release_name }}
+          artifacts: "*.whl"
+          allowUpdates: true
+
+  make-packages-index:
+    needs: create-release
+    permissions:
+      pages: write
+      id-token: write
+    if: ${{ github.ref == 'refs/heads/main' }}
+    uses: ./.github/workflows/make_packages_index.yml
