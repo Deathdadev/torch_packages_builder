@@ -210,7 +210,7 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           # Pin vcpkg commit to a known-good version for reproducibility.
-          vcpkgGitCommitId: e31988e3483f063c6d2c6734e97e2837d2c186c7
+          vcpkgGitCommitId: ef7dbf94b9198bc58f45951adcf1f041fcbc5ea0
 
       - name: Install sparsehash for torchsparse (Windows)
         if: runner.os == 'Windows' && inputs.repo == 'Deathdadev/torchsparse'
